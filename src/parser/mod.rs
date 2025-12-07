@@ -28,6 +28,9 @@ use helpers::attached_token::AttachedToken;
 
 use log::debug;
 
+use crate::ast::{CypherStatement, CypherMatch, CypherReturn};
+
+
 use recursion::RecursionCounter;
 use IsLateral::*;
 use IsOptional::*;
@@ -345,6 +348,62 @@ pub struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    /// Parse a Cypher statement that started with `MATCH`.
+    ///
+    /// We are called *after* `MATCH` has already been consumed in `parse_statement`.
+    pub fn parse_cypher_statement(&mut self) -> Result<Statement, ParserError> {
+        let match_clause = self.parse_cypher_match()?;
+
+        // Optional WHERE
+        let where_clause = if self.parse_keyword(Keyword::WHERE) {
+            // Reusing SQL expression parser here is fine for project purposes
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        // RETURN clause is required in this minimal subset
+        self.expect_keyword_is(Keyword::RETURN)?;
+        let return_clause = self.parse_cypher_return()?;
+
+        Ok(Statement::Cypher(CypherStatement {
+            match_clause,
+            where_clause,
+            return_clause,
+        }))
+    }
+
+    /// Very minimal MATCH parser: gathers the pattern text until WHERE or RETURN.
+    fn parse_cypher_match(&mut self) -> Result<CypherMatch, ParserError> {
+        let mut pattern_parts = Vec::new();
+
+        loop {
+            // Stop before WHERE or RETURN (don't consume them here)
+            if self.peek_keywords(&[Keyword::WHERE]) || self.peek_keywords(&[Keyword::RETURN]) {
+                break;
+            }
+
+            let tok = self.next_token();
+            if matches!(tok.token, Token::EOF) {
+                return self.expected("RETURN or WHERE in Cypher MATCH", tok);
+            }
+
+            pattern_parts.push(tok.to_string());
+        }
+
+        Ok(CypherMatch {
+            pattern: pattern_parts.join(" "),
+        })
+    }
+
+    /// Minimal RETURN parser: `RETURN` followed by comma-separated identifiers.
+    fn parse_cypher_return(&mut self) -> Result<CypherReturn, ParserError> {
+        // We assume RETURN keyword has already been consumed.
+        let items = self.parse_comma_separated(Parser::parse_identifier)?;
+        Ok(CypherReturn { items })
+    }
+
+
     /// Create a parser for a [`Dialect`]
     ///
     /// See also [`Parser::parse_sql`]
@@ -542,6 +601,14 @@ impl<'a> Parser<'a> {
         let next_token = self.next_token();
         match &next_token.token {
             Token::Word(w) => match w.keyword {
+
+                // Cypher entry point
+                Keyword::MATCH => {
+                // We have already consumed `MATCH` into `next_token`, so
+                // `parse_cypher_statement` should assume we're *after* MATCH.
+                    self.parse_cypher_statement()
+                }
+                
                 Keyword::KILL => self.parse_kill(),
                 Keyword::FLUSH => self.parse_flush(),
                 Keyword::DESC => self.parse_explain(DescribeAlias::Desc),

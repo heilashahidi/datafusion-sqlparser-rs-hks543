@@ -114,6 +114,10 @@ pub use visitor::*;
 
 pub use self::data_type::GeometricTypeKind;
 
+mod cypher;
+pub use cypher::{CypherStatement, CypherMatch, CypherReturn};
+
+
 mod data_type;
 mod dcl;
 mod ddl;
@@ -3174,6 +3178,11 @@ pub enum Statement {
     /// SELECT
     /// ```
     Query(Box<Query>),
+    /// ```cypher
+    /// MATCH ... RETURN ...
+    /// ```
+    /// A Cypher graph query (project-specific extension).
+    Cypher(CypherStatement),
     /// ```sql
     /// INSERT
     /// ```
@@ -5757,6 +5766,7 @@ impl fmt::Display for Statement {
             Statement::AlterSchema(s) => write!(f, "{s}"),
             Statement::Vacuum(s) => write!(f, "{s}"),
             Statement::AlterUser(s) => write!(f, "{s}"),
+            Statement::Cypher(c) => write!(f, "{c:?}"), 
         }
     }
 }
